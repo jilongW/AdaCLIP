@@ -1,0 +1,6 @@
+__pycache__/
+.DS_Store
+output/
+tensorboard/
+.vscode/
+.ipynb_checkpoints/
