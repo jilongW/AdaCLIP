@@ -1,3 +1,9 @@
+# Copyright (C) 2025 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+import torch
+
+
 """
 modified from UNITER codebase
 
@@ -5,44 +11,50 @@ A meta data loader for sampling from different datasets / training tasks
 A prefetch loader to speedup data loading
 """
 
-import torch
 
-
-def move_to_cuda(batch):
+def move_to_device(batch, device):
     if isinstance(batch, torch.Tensor):
-        return batch.cuda(non_blocking=True)
+        return batch.to(device, non_blocking=True)
     elif isinstance(batch, list):
-        new_batch = [move_to_cuda(t) for t in batch]
+        new_batch = [move_to_device(t, device) for t in batch]
     elif isinstance(batch, tuple):
-        new_batch = tuple(move_to_cuda(t) for t in batch)
+        new_batch = tuple(move_to_device(t, device) for t in batch)
     elif isinstance(batch, dict):
-        new_batch = {n: move_to_cuda(t) for n, t in batch.items()}
+        new_batch = {n: move_to_device(t, device) for n, t in batch.items()}
     else:
         return batch
     return new_batch
 
 
-def record_cuda_stream(batch):
+def record_device_stream(batch, device):
     if isinstance(batch, torch.Tensor):
-        batch.record_stream(torch.cuda.current_stream())
+        if str(device) == "xpu":
+            batch.record_stream(torch.xpu.current_stream(device=device))
+        else:
+            batch.record_stream(torch.cuda.current_stream(device=device))
+
     elif isinstance(batch, list) or isinstance(batch, tuple):
         for t in batch:
-            record_cuda_stream(t)
+            record_device_stream(t, device)
     elif isinstance(batch, dict):
         for t in batch.values():
-            record_cuda_stream(t)
+            record_device_stream(t, device)
     else:
         pass
 
 
-class PrefetchLoader(object):
-    """
-    overlap compute and cuda data transfer
-    (copied and then modified from nvidia apex)
-    """
-    def __init__(self, loader):
+class PrefetchLoader:
+    """Overlap compute and device data transfer."""
+
+    def __init__(self, loader, device):
         self.loader = loader
-        self.stream = torch.cuda.Stream()
+        self.device = device
+        if str(device) == "xpu":
+            self.stream = torch.xpu.Stream(device=device)
+        elif str(device) == "cuda":
+            self.stream = torch.cuda.Stream()
+        else:
+            raise ValueError(f"Unsupported device type: {device}")
 
     def __iter__(self):
         loader_it = iter(self.loader)
@@ -72,21 +84,28 @@ class PrefetchLoader(object):
         # Need to make sure the memory allocated for next_* is not still in use
         # by the main stream at the time we start copying to next_*:
         # self.stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(self.stream):
-            self.batch = move_to_cuda(self.batch)
-            # more code for the alternative if record_stream() doesn't work:
-            # copy_ will record the use of the pinned source tensor in this
-            # side stream.
-            # self.next_input_gpu.copy_(self.next_input, non_blocking=True)
-            # self.next_target_gpu.copy_(self.next_target, non_blocking=True)
-            # self.next_input = self.next_input_gpu
-            # self.next_target = self.next_target_gpu
+        if str(self.device) == "xpu":
+            with torch.xpu.stream(self.stream):
+                self.batch = move_to_device(self.batch, self.device)
+        else:
+            with torch.cuda.stream(self.stream):
+                self.batch = move_to_device(self.batch, self.device)
+                # more code for the alternative if record_stream() doesn't work:
+                # copy_ will record the use of the pinned source tensor in this
+                # side stream.
+                # self.next_input_gpu.copy_(self.next_input, non_blocking=True)
+                # self.next_target_gpu.copy_(self.next_target, non_blocking=True)
+                # self.next_input = self.next_input_gpu
+                # self.next_target = self.next_target_gpu
 
     def next(self, it):
-        torch.cuda.current_stream().wait_stream(self.stream)
+        if str(self.device) == "xpu":
+            torch.xpu.current_stream(device=self.device).wait_stream(self.stream)
+        else:
+            torch.cuda.current_stream().wait_stream(self.stream)
         batch = self.batch
         if batch is not None:
-            record_cuda_stream(batch)
+            record_device_stream(batch, self.device)
         self.preload(it)
         return batch
 
