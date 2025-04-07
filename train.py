@@ -419,8 +419,8 @@ def train(cfg, trial=None):
         writer = NoOp()
 
     if not cfg.no_output:
-        output_dir = os.path.join(cfg.output_dir, expname, timestamp)
-        add_log_to_file(os.path.join(output_dir, "log.info"))
+        output_dir = os.path.join(cfg.output_dir)
+        add_log_to_file(os.path.join(output_dir, "running_log.txt"))
         save_json(cfg, os.path.join(output_dir, "config.json"), save_pretty=True)
 
     model, epoch = setup_model(cfg, device=device)
