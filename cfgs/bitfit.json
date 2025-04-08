@@ -1,0 +1,23 @@
+{
+    "dataset": "activitynet",
+    "train_annot": "dataset_example/dataset.json",
+    "val_annot": "dataset_example/dataset.json",
+    "test_annot": "dataset_example/dataset.json",
+    "frames_dir": "data/activitynet/frames",
+    "concat_captions": "concat",
+    "max_txt_len": 64,
+    "num_frm": 32,
+    "batch_size": 16, 
+    "peft": {
+        "method": "bitfit", 
+        "config": {
+            "keep_module_keywords": [
+                "ln_post", 
+                "visual.proj", 
+                "ln_final", 
+                "text_projection", 
+                "logit_scale"
+            ]
+        }
+    }
+}
